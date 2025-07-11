@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trợ lý Tài liệu (Hỗ trợ API Key)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@300;400;500;700&display=swap" rel="stylesheet">
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js`;
+    </script>
+
+    <style>
+        body {
+            font-family: 'Be Vietnam Pro', sans-serif;
+        }
+        .chat-bubble-user { background-color: #3b82f6; color: white; }
+        .chat-bubble-bot { background-color: #e5e7eb; color: #1f2937; }
+        .file-item:hover { background-color: #f3f4f6; }
+        #drop-zone.drag-over { border-color: #2563eb; background-color: #eff6ff; }
+        .spinner {
+            border-color: #f3f4f6;
+            border-top-color: #3b82f6;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .mic-listening {
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 6px; }
+        ::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+    <div class="flex h-screen">
+        <!-- Sidebar -->
+        <aside class="w-full md:w-1/3 lg:w-1/4 bg-white border-r border-gray-200 flex flex-col p-4 transition-all duration-300">
+            <header class="pb-4 border-b border-gray-200">
+                <h1 class="text-2xl font-bold text-blue-600">Trợ lý Tài liệu</h1>
+                <p class="text-sm text-gray-500 mt-1">Tải lên và hỏi đáp về tài liệu của bạn.</p>
+            </header>
+
+            <div id="upload-section" class="mt-6">
+                <input type="file" id="file-input" multiple class="hidden" accept=".txt,.md,.csv,.pdf">
+                <div id="drop-zone" class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer hover:border-blue-500 transition-colors">
+                    <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true"><path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                    <p class="mt-2 text-sm text-gray-600"><span class="font-semibold text-blue-600">Nhấn để tải lên</span> hoặc kéo thả</p>
+                    <p class="text-xs text-gray-500">Hỗ trợ PDF, TXT, MD, CSV</p>
+                </div>
+            </div>
+
+            <div id="file-list-section" class="mt-6 flex-grow overflow-y-auto">
+                <h2 class="text-lg font-semibold text-gray-700">Tài liệu đã tải lên</h2>
+                <div id="file-list" class="mt-2 space-y-2">
+                     <p id="no-files-message" class="text-sm text-gray-400 italic mt-4 text-center">Chưa có tài liệu nào.</p>
+                </div>
+            </div>
+
+            <!-- *** NEW: API Key Settings Section *** -->
+            <div class="mt-auto pt-4 border-t border-gray-200">
+                <h2 class="text-lg font-semibold text-gray-700">Cài đặt API</h2>
+                <div class="mt-2 space-y-2">
+                    <label for="api-key-input" class="text-sm font-medium text-gray-600">Google AI API Key</label>
+                    <input type="password" id="api-key-input" placeholder="Dán API Key của bạn vào đây" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <button id="save-api-key-btn" class="w-full px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">Lưu Key</button>
+                    <p id="api-key-status" class="text-xs text-center text-gray-500"></p>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Chat Area -->
+        <main id="chat-container" class="w-full md:w-2/3 lg:w-3/4 flex flex-col bg-gray-100 h-screen">
+            <div id="welcome-screen" class="flex flex-col items-center justify-center h-full text-center p-8">
+                <svg class="h-24 w-24 text-blue-300" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12c0 1.821.487 3.53 1.338 5.001L2 22l4.999-1.338A9.96 9.96 0 0 0 12 22z"></path><path d="M17 10.5c-1.5-1.5-4-1.5-5.5 0S7 14.5 8.5 16c.75.75 1.75 1.25 2.5 1.25s1.75-.5 2.5-1.25C17 14.5 17 12 17 10.5z"></path></svg>
+                <h2 class="mt-4 text-2xl font-bold text-gray-700">Chào mừng bạn!</h2>
+                <p class="mt-2 text-gray-500 max-w-md">Tải lên tài liệu và nhập API Key để bắt đầu trò chuyện.</p>
+            </div>
+
+            <div id="chat-screen" class="hidden flex-1 flex flex-col">
+                <div id="chat-messages" class="flex-1 p-6 overflow-y-auto space-y-4"></div>
+                <div class="p-4 bg-white border-t border-gray-200">
+                    <form id="chat-form" class="flex items-center space-x-2 md:space-x-4">
+                        <input type="text" id="chat-input" placeholder="Hỏi điều gì đó hoặc nhấn micro để nói..." class="flex-1 w-full px-4 py-2 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500" autocomplete="off" disabled>
+                        <button type="button" id="mic-btn" class="text-gray-500 p-3 rounded-full hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors disabled:text-gray-300 disabled:hover:bg-transparent" disabled>
+                           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-6 w-6"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line></svg>
+                        </button>
+                        <button type="submit" id="send-btn" class="bg-blue-600 text-white p-3 rounded-full hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors disabled:bg-blue-300 disabled:cursor-not-allowed" disabled>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-6 w-6"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // --- DOM Elements ---
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const fileList = document.getElementById('file-list');
+        const noFilesMessage = document.getElementById('no-files-message');
+        const welcomeScreen = document.getElementById('welcome-screen');
+        const chatScreen = document.getElementById('chat-screen');
+        const chatMessages = document.getElementById('chat-messages');
+        const chatForm = document.getElementById('chat-form');
+        const chatInput = document.getElementById('chat-input');
+        const sendButton = document.getElementById('send-btn');
+        const micButton = document.getElementById('mic-btn');
+        const apiKeyInput = document.getElementById('api-key-input');
+        const saveApiKeyBtn = document.getElementById('save-api-key-btn');
+        const apiKeyStatus = document.getElementById('api-key-status');
+
+        // --- State ---
+        let uploadedFiles = [];
+        let isBotTyping = false;
+        
+        // --- Web Speech API ---
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition;
+        let isListening = false;
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.lang = 'vi-VN';
+            recognition.interimResults = false;
+            recognition.onstart = () => { isListening = true; micButton.classList.add('text-red-500', 'mic-listening'); };
+            recognition.onend = () => { isListening = false; micButton.classList.remove('text-red-500', 'mic-listening'); };
+            recognition.onresult = (event) => {
+                const transcript = event.results[0][0].transcript;
+                chatInput.value = transcript;
+                if (transcript) chatForm.requestSubmit(sendButton);
+            };
+            recognition.onerror = (event) => console.error('Speech recognition error:', event.error);
+        } else {
+            console.log("Trình duyệt không hỗ trợ Web Speech API.");
+            if(micButton) micButton.style.display = 'none';
+        }
+
+        // --- Event Listeners ---
+        document.addEventListener('DOMContentLoaded', () => {
+            const savedKey = sessionStorage.getItem('gemini-api-key');
+            if (savedKey) {
+                apiKeyInput.value = savedKey;
+                apiKeyStatus.textContent = 'Đã tải API Key đã lưu.';
+                apiKeyStatus.className = 'text-xs text-center text-green-600';
+            } else {
+                apiKeyStatus.textContent = 'Cần có API Key để trò chuyện.';
+                apiKeyStatus.className = 'text-xs text-center text-red-600';
+            }
+        });
+
+        saveApiKeyBtn.addEventListener('click', () => {
+            const key = apiKeyInput.value.trim();
+            if (key) {
+                sessionStorage.setItem('gemini-api-key', key);
+                apiKeyStatus.textContent = 'API Key đã được lưu cho phiên này.';
+                apiKeyStatus.className = 'text-xs text-center text-green-600';
+                checkAllFilesReady();
+            } else {
+                sessionStorage.removeItem('gemini-api-key');
+                apiKeyStatus.textContent = 'Cần có API Key để trò chuyện.';
+                apiKeyStatus.className = 'text-xs text-center text-red-600';
+                checkAllFilesReady();
+            }
+        });
+
+        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+        dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('drag-over'); });
+        dropZone.addEventListener('drop', (e) => { e.preventDefault(); dropZone.classList.remove('drag-over'); handleFiles(e.dataTransfer.files); });
+        fileInput.addEventListener('change', (e) => { handleFiles(e.target.files); });
+        chatForm.addEventListener('submit', handleChatSubmit);
+        micButton.addEventListener('click', () => {
+            if (!SpeechRecognition || isListening) {
+                if(recognition) recognition.stop();
+                return;
+            };
+            try { if(recognition) recognition.start(); } catch(e) { console.error("Error starting recognition:", e); }
+        });
+
+        // --- Core Functions ---
+        function handleFiles(files) {
+            if (files.length === 0) return;
+            noFilesMessage.classList.add('hidden');
+            activateChat();
+            for (const file of files) {
+                const fileId = `file-${file.name}-${file.lastModified}`;
+                if (uploadedFiles.some(f => f.id === fileId)) continue;
+                const fileObject = { id: fileId, name: file.name, size: file.size, status: 'processing', content: '', rawFile: file };
+                uploadedFiles.push(fileObject);
+                addFileToList(fileObject);
+                processFile(fileObject);
+            }
+        }
+
+        async function processFile(fileObject) {
+            const extension = fileObject.name.split('.').pop().toLowerCase();
+            if (extension === 'pdf') {
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    try {
+                        const pdf = await pdfjsLib.getDocument({ data: e.target.result }).promise;
+                        let fullText = '';
+                        for (let i = 1; i <= pdf.numPages; i++) {
+                            const page = await pdf.getPage(i);
+                            const textContent = await page.getTextContent();
+                            fullText += textContent.items.map(item => item.str).join(' ') + '\n';
+                        }
+                        fileObject.content = fullText;
+                        fileObject.status = 'ready';
+                        updateFileStatus(fileObject.id, 'Sẵn sàng', 'text-green-600');
+                    } catch (error) {
+                        fileObject.content = 'Lỗi khi xử lý tệp PDF.'; fileObject.status = 'error';
+                        updateFileStatus(fileObject.id, 'Lỗi PDF', 'text-red-600');
+                    } finally {
+                        checkAllFilesReady();
+                    }
+                };
+                reader.onerror = () => {
+                    fileObject.content = 'Không thể đọc tệp PDF.'; fileObject.status = 'error';
+                    updateFileStatus(fileObject.id, 'Lỗi đọc tệp', 'text-red-600');
+                    checkAllFilesReady();
+                };
+                reader.readAsArrayBuffer(fileObject.rawFile);
+            } else {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    fileObject.content = e.target.result; fileObject.status = 'ready';
+                    updateFileStatus(fileObject.id, 'Sẵn sàng', 'text-green-600');
+                    checkAllFilesReady();
+                };
+                reader.onerror = () => {
+                    fileObject.content = 'Không thể đọc tệp.'; fileObject.status = 'error';
+                    updateFileStatus(fileObject.id, 'Lỗi đọc tệp', 'text-red-600');
+                    checkAllFilesReady();
+                };
+                reader.readAsText(fileObject.rawFile);
+            }
+        }
+
+        function removeFile(fileId) {
+            uploadedFiles = uploadedFiles.filter(f => f.id !== fileId);
+            const fileItem = fileList.querySelector(`[data-file-id="${fileId}"]`);
+            if (fileItem) fileItem.remove();
+            if (uploadedFiles.length === 0) deactivateChat();
+            else checkAllFilesReady();
+        }
+        
+        function checkAllFilesReady() {
+            const allFilesReady = uploadedFiles.every(f => f.status === 'ready' || f.status === 'error');
+            const apiKeyPresent = !!sessionStorage.getItem('gemini-api-key');
+
+            if (allFilesReady && uploadedFiles.length > 0 && apiKeyPresent) {
+                chatInput.disabled = false;
+                sendButton.disabled = false;
+                if(micButton) micButton.disabled = false;
+                addBotMessage("Tất cả tài liệu đã sẵn sàng và API Key hợp lệ. Bạn muốn hỏi gì?");
+            } else {
+                chatInput.disabled = true;
+                sendButton.disabled = true;
+                if(micButton) micButton.disabled = true;
+            }
+        }
+
+        async function handleChatSubmit(e) {
+            e.preventDefault();
+            const userQuery = chatInput.value.trim();
+            if (!userQuery || isBotTyping) return;
+
+            const apiKey = sessionStorage.getItem('gemini-api-key');
+            if (!apiKey) {
+                addBotMessage("Vui lòng nhập và lưu API Key của bạn ở thanh bên để bắt đầu trò chuyện.", false);
+                return;
+            }
+
+            addUserMessage(userQuery);
+            chatInput.value = '';
+            sendButton.disabled = true;
+            if(micButton) micButton.disabled = true;
+            showTypingIndicator();
+            const knowledgeBase = uploadedFiles.map(f => `--- NỘI DUNG TỪ TỆP: ${f.name} ---\n${f.content}`).join('\n\n');
+            try {
+                const prompt = `Dựa HOÀN TOÀN vào ngữ cảnh được cung cấp dưới đây:\n--- BEGIN CONTEXT ---\n${knowledgeBase}\n--- END CONTEXT ---\n\nHãy trả lời câu hỏi của người dùng: "${userQuery}".\n\nQUY TẮC TUYỆT ĐỐI: \n1. Chỉ sử dụng thông tin trong phần "CONTEXT".\n2. Không được thêm bất kỳ thông tin nào từ bên ngoài, dù nó đúng.\n3. Nếu câu trả lời không có trong ngữ cảnh, hãy nói rõ: "Tôi không tìm thấy thông tin này trong các tài liệu đã cung cấp."`;
+                let chatHistory = [{ role: "user", parts: [{ text: prompt }] }];
+                const payload = { contents: chatHistory };
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+                const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                if (!response.ok) throw new Error(`API call failed: ${response.status}`);
+                const result = await response.json();
+                let botResponse = "Xin lỗi, tôi gặp sự cố khi xử lý yêu cầu.";
+                if (result.candidates && result.candidates[0].content && result.candidates[0].content.parts[0]) {
+                    botResponse = result.candidates[0].content.parts[0].text;
+                }
+                hideTypingIndicator();
+                addBotMessage(botResponse, true);
+            } catch (error) {
+                console.error("Error calling Gemini API:", error);
+                hideTypingIndicator();
+                addBotMessage("Rất tiếc, đã có lỗi xảy ra. Vui lòng kiểm tra lại API Key hoặc thử lại sau.", false);
+            } finally {
+                if(uploadedFiles.length > 0) {
+                    sendButton.disabled = false;
+                    if(micButton) micButton.disabled = false;
+                }
+            }
+        }
+
+        // --- UI Functions ---
+        function addFileToList(file) {
+            const fileItem = document.createElement('div');
+            fileItem.setAttribute('data-file-id', file.id);
+            fileItem.className = 'file-item flex items-center p-2 rounded-md transition-colors';
+            fileItem.innerHTML = `<div class="flex-shrink-0">${getFileIcon(file.name)}</div><div class="ml-3 flex-1 min-w-0"><p class="text-sm font-medium text-gray-800 truncate">${file.name}</p><div class="flex items-center text-xs text-gray-500"><span class="file-status-icon mr-1.5"><div class="spinner h-3 w-3 rounded-full border-2"></div></span><span class="file-status-text">Đang xử lý...</span></div></div><button class="delete-file-btn ml-2 flex-shrink-0 p-1 text-gray-400 hover:text-red-600 rounded-full focus:outline-none focus:ring-2 focus:ring-red-500"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>`;
+            fileList.appendChild(fileItem);
+            fileItem.querySelector('.delete-file-btn').addEventListener('click', (e) => { e.stopPropagation(); removeFile(file.id); });
+        }
+
+        function updateFileStatus(fileId, text, colorClass) {
+            const fileItem = fileList.querySelector(`[data-file-id="${fileId}"]`);
+            if (!fileItem) return;
+            const statusIcon = fileItem.querySelector('.file-status-icon');
+            const statusText = fileItem.querySelector('.file-status-text');
+            statusIcon.innerHTML = `<div class="w-2 h-2 ${colorClass.includes('red') ? 'bg-red-500' : 'bg-green-500'} rounded-full"></div>`;
+            statusText.textContent = text;
+            statusText.className = `file-status-text ${colorClass}`;
+        }
+
+        function getFileIcon(fileName) {
+            const ext = fileName.split('.').pop().toLowerCase();
+            if (ext === 'pdf') return `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-6 w-6 text-red-500"><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M4 12V4a2 2 0 0 1 2-2h8l6 6v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"/><path d="M9 15a1 1 0 0 0-1 1v1a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1H9Z"/><path d="M15 15h-1a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1Z"/></svg>`;
+            if (['txt', 'md', 'csv'].includes(ext)) return `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-6 w-6 text-blue-500"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>`;
+            return `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-6 w-6 text-gray-500"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>`;
+        }
+
+        function activateChat() {
+            if (welcomeScreen.style.display !== 'none') {
+                welcomeScreen.style.display = 'none';
+                chatScreen.classList.remove('hidden');
+                chatScreen.classList.add('flex');
+                chatMessages.innerHTML = '';
+                addBotMessage("Tôi đang xử lý tài liệu của bạn, vui lòng đợi...", false);
+            }
+        }
+        
+        function deactivateChat() {
+            welcomeScreen.style.display = 'flex';
+            chatScreen.classList.add('hidden');
+            chatScreen.classList.remove('flex');
+        }
+
+        function addMessageToChat(message, sender, canSpeak) {
+            const msgWrapper = document.createElement('div');
+            msgWrapper.className = `flex items-end space-x-2 ${sender === 'user' ? 'justify-end' : 'justify-start'}`;
+            const msgBubble = document.createElement('div');
+            msgBubble.className = `max-w-md lg:max-w-xl px-4 py-2 rounded-xl shadow ${sender === 'user' ? 'chat-bubble-user' : 'chat-bubble-bot'}`;
+            msgBubble.textContent = message;
+            if (sender === 'user') {
+                msgWrapper.appendChild(msgBubble);
+            } else {
+                msgWrapper.appendChild(msgBubble);
+                if (canSpeak && 'speechSynthesis' in window) {
+                    const speakBtn = document.createElement('button');
+                    speakBtn.className = 'p-1 text-gray-400 hover:text-blue-600 rounded-full focus:outline-none';
+                    speakBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>`;
+                    speakBtn.onclick = () => speakText(message);
+                    msgWrapper.appendChild(speakBtn);
+                }
+            }
+            chatMessages.appendChild(msgWrapper);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+        
+        function speakText(text) {
+            if (!('speechSynthesis' in window)) return;
+            speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'vi-VN';
+            speechSynthesis.speak(utterance);
+        }
+
+        function addBotMessage(message, canSpeak) { addMessageToChat(message, 'bot', canSpeak); }
+        function addUserMessage(message) { addMessageToChat(message, 'user', false); }
+        
+        function showTypingIndicator() {
+            isBotTyping = true;
+            const indicator = document.createElement('div');
+            indicator.id = 'typing-indicator';
+            indicator.className = 'flex justify-start';
+            indicator.innerHTML = `<div class="max-w-md lg:max-w-lg px-4 py-2 rounded-xl shadow chat-bubble-bot flex items-center space-x-1"><span class="w-2 h-2 bg-gray-400 rounded-full animate-pulse" style="animation-delay: 0s;"></span><span class="w-2 h-2 bg-gray-400 rounded-full animate-pulse" style="animation-delay: 0.2s;"></span><span class="w-2 h-2 bg-gray-400 rounded-full animate-pulse" style="animation-delay: 0.4s;"></span></div>`;
+            chatMessages.appendChild(indicator);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function hideTypingIndicator() {
+            isBotTyping = false;
+            const indicator = document.getElementById('typing-indicator');
+            if (indicator) indicator.remove();
+        }
+    </script>
+</body>
+</html>
