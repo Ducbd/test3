@@ -3,13 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trợ lý Tài liệu (Hỗ trợ API Key)</title>
+    <title>Trợ lý Tài liệu (Phân tích Thông minh)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@300;400;500;700&display=swap" rel="stylesheet">
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <!-- *** NEW: Add showdown.js for Markdown to HTML conversion *** -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/showdown/2.1.0/showdown.min.js"></script>
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js`;
     </script>
@@ -28,14 +30,22 @@
             animation: spin 1s linear infinite;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
-        .mic-listening {
-            animation: pulse 1.5s infinite;
-        }
+        .mic-listening { animation: pulse 1.5s infinite; }
         @keyframes pulse {
             0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
             70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
             100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
         }
+        /* Styles for rendered Markdown in chat bubbles */
+        .prose { color: #374151; }
+        .prose h1, .prose h2, .prose h3 { margin-bottom: 0.5em; margin-top: 1em; font-weight: 600; }
+        .prose h1 { font-size: 1.25rem; }
+        .prose h2 { font-size: 1.1rem; }
+        .prose h3 { font-size: 1rem; }
+        .prose p { margin-bottom: 0.5em; }
+        .prose ul { list-style-type: disc; padding-left: 1.5em; margin-bottom: 0.5em; }
+        .prose strong { font-weight: 600; }
+
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: #f1f1f1; }
         ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 6px; }
@@ -68,7 +78,6 @@
                 </div>
             </div>
 
-            <!-- *** NEW: API Key Settings Section *** -->
             <div class="mt-auto pt-4 border-t border-gray-200">
                 <h2 class="text-lg font-semibold text-gray-700">Cài đặt API</h2>
                 <div class="mt-2 space-y-2">
@@ -91,6 +100,12 @@
             <div id="chat-screen" class="hidden flex-1 flex flex-col">
                 <div id="chat-messages" class="flex-1 p-6 overflow-y-auto space-y-4"></div>
                 <div class="p-4 bg-white border-t border-gray-200">
+                    <!-- *** NEW: Added Summarize Button *** -->
+                    <div class="flex justify-center mb-2">
+                         <button id="summarize-btn" class="px-4 py-2 text-sm font-semibold text-white bg-indigo-600 rounded-full hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-indigo-300 disabled:cursor-not-allowed" disabled>
+                            Tổng kết & Phân tích
+                        </button>
+                    </div>
                     <form id="chat-form" class="flex items-center space-x-2 md:space-x-4">
                         <input type="text" id="chat-input" placeholder="Hỏi điều gì đó hoặc nhấn micro để nói..." class="flex-1 w-full px-4 py-2 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500" autocomplete="off" disabled>
                         <button type="button" id="mic-btn" class="text-gray-500 p-3 rounded-full hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors disabled:text-gray-300 disabled:hover:bg-transparent" disabled>
@@ -121,10 +136,12 @@
         const apiKeyInput = document.getElementById('api-key-input');
         const saveApiKeyBtn = document.getElementById('save-api-key-btn');
         const apiKeyStatus = document.getElementById('api-key-status');
+        const summarizeBtn = document.getElementById('summarize-btn');
 
-        // --- State ---
+        // --- State & Converters ---
         let uploadedFiles = [];
         let isBotTyping = false;
+        const markdownConverter = new showdown.Converter();
         
         // --- Web Speech API ---
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -167,13 +184,12 @@
                 sessionStorage.setItem('gemini-api-key', key);
                 apiKeyStatus.textContent = 'API Key đã được lưu cho phiên này.';
                 apiKeyStatus.className = 'text-xs text-center text-green-600';
-                checkAllFilesReady();
             } else {
                 sessionStorage.removeItem('gemini-api-key');
                 apiKeyStatus.textContent = 'Cần có API Key để trò chuyện.';
                 apiKeyStatus.className = 'text-xs text-center text-red-600';
-                checkAllFilesReady();
             }
+            checkAllFilesReady();
         });
 
         dropZone.addEventListener('click', () => fileInput.click());
@@ -183,12 +199,11 @@
         fileInput.addEventListener('change', (e) => { handleFiles(e.target.files); });
         chatForm.addEventListener('submit', handleChatSubmit);
         micButton.addEventListener('click', () => {
-            if (!SpeechRecognition || isListening) {
-                if(recognition) recognition.stop();
-                return;
-            };
+            if (!SpeechRecognition || isListening) { if(recognition) recognition.stop(); return; };
             try { if(recognition) recognition.start(); } catch(e) { console.error("Error starting recognition:", e); }
         });
+        summarizeBtn.addEventListener('click', handleSummaryRequest);
+
 
         // --- Core Functions ---
         function handleFiles(files) {
@@ -261,39 +276,60 @@
         function checkAllFilesReady() {
             const allFilesReady = uploadedFiles.every(f => f.status === 'ready' || f.status === 'error');
             const apiKeyPresent = !!sessionStorage.getItem('gemini-api-key');
+            const isReady = allFilesReady && uploadedFiles.length > 0 && apiKeyPresent;
 
-            if (allFilesReady && uploadedFiles.length > 0 && apiKeyPresent) {
-                chatInput.disabled = false;
-                sendButton.disabled = false;
-                if(micButton) micButton.disabled = false;
-                addBotMessage("Tất cả tài liệu đã sẵn sàng và API Key hợp lệ. Bạn muốn hỏi gì?");
-            } else {
-                chatInput.disabled = true;
-                sendButton.disabled = true;
-                if(micButton) micButton.disabled = true;
+            chatInput.disabled = !isReady;
+            sendButton.disabled = !isReady;
+            summarizeBtn.disabled = !isReady;
+            if(micButton) micButton.disabled = !isReady;
+
+            if (isReady) {
+                 if (!document.querySelector('.initial-ready-message')) {
+                    addBotMessage("Tài liệu và API Key đã sẵn sàng. Bạn có thể hỏi hoặc yêu cầu tổng kết.", false, 'initial-ready-message');
+                }
             }
         }
 
         async function handleChatSubmit(e) {
             e.preventDefault();
             const userQuery = chatInput.value.trim();
-            if (!userQuery || isBotTyping) return;
+            if (!userQuery) return;
+            const prompt = `Dựa HOÀN TOÀN vào ngữ cảnh được cung cấp dưới đây, hãy trả lời câu hỏi sau một cách ngắn gọn và trực tiếp: "${userQuery}".\n\nQUY TẮC: Nếu câu trả lời không có trong ngữ cảnh, hãy nói rõ: "Tôi không tìm thấy thông tin này trong các tài liệu đã cung cấp."`;
+            await sendPromptToAI(prompt, userQuery);
+            chatInput.value = '';
+        }
 
+        // *** NEW: Function to handle the summary request ***
+        async function handleSummaryRequest() {
+            addUserMessage("Vui lòng tổng kết và phân tích các tài liệu.");
+            const summaryPrompt = `Bạn là một trợ lý phân tích tài liệu chuyên nghiệp. Dựa HOÀN TOÀN vào ngữ cảnh được cung cấp dưới đây, hãy thực hiện các yêu cầu sau:
+            1.  **Tóm tắt mục đích chính:** Trình bày ngắn gọn mục tiêu hoặc nội dung cốt lõi của toàn bộ tài liệu.
+            2.  **Trích xuất thông tin quan trọng:** Liệt kê các điểm dữ liệu quan trọng nhất dưới dạng gạch đầu dòng, bao gồm (nếu có): các quyết định, số liệu tài chính, ngày tháng quan trọng, các bên liên quan, và các mục hành động.
+            3.  **Trình bày chuyên nghiệp:** Sử dụng định dạng Markdown (tiêu đề, in đậm, gạch đầu dòng) để cấu trúc câu trả lời cho dễ đọc.
+            
+            QUY TẮC TUYỆT ĐỐI: Không được thêm bất kỳ thông tin nào không có trong ngữ cảnh.`;
+            await sendPromptToAI(summaryPrompt);
+        }
+
+        // *** REFACTORED: Central function to send prompts to the AI ***
+        async function sendPromptToAI(promptText, userQueryForDisplay) {
+            if (isBotTyping) return;
             const apiKey = sessionStorage.getItem('gemini-api-key');
             if (!apiKey) {
                 addBotMessage("Vui lòng nhập và lưu API Key của bạn ở thanh bên để bắt đầu trò chuyện.", false);
                 return;
             }
 
-            addUserMessage(userQuery);
-            chatInput.value = '';
-            sendButton.disabled = true;
-            if(micButton) micButton.disabled = true;
+            if(userQueryForDisplay) addUserMessage(userQueryForDisplay);
+            
+            setChatUIState(true);
             showTypingIndicator();
+
             const knowledgeBase = uploadedFiles.map(f => `--- NỘI DUNG TỪ TỆP: ${f.name} ---\n${f.content}`).join('\n\n');
+            const fullPrompt = `${promptText}\n\n--- BEGIN CONTEXT ---\n${knowledgeBase}\n--- END CONTEXT ---`;
+
             try {
-                const prompt = `Dựa HOÀN TOÀN vào ngữ cảnh được cung cấp dưới đây:\n--- BEGIN CONTEXT ---\n${knowledgeBase}\n--- END CONTEXT ---\n\nHãy trả lời câu hỏi của người dùng: "${userQuery}".\n\nQUY TẮC TUYỆT ĐỐI: \n1. Chỉ sử dụng thông tin trong phần "CONTEXT".\n2. Không được thêm bất kỳ thông tin nào từ bên ngoài, dù nó đúng.\n3. Nếu câu trả lời không có trong ngữ cảnh, hãy nói rõ: "Tôi không tìm thấy thông tin này trong các tài liệu đã cung cấp."`;
-                let chatHistory = [{ role: "user", parts: [{ text: prompt }] }];
+                let chatHistory = [{ role: "user", parts: [{ text: fullPrompt }] }];
                 const payload = { contents: chatHistory };
                 const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
                 const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -310,11 +346,16 @@
                 hideTypingIndicator();
                 addBotMessage("Rất tiếc, đã có lỗi xảy ra. Vui lòng kiểm tra lại API Key hoặc thử lại sau.", false);
             } finally {
-                if(uploadedFiles.length > 0) {
-                    sendButton.disabled = false;
-                    if(micButton) micButton.disabled = false;
-                }
+                setChatUIState(false);
             }
+        }
+        
+        function setChatUIState(isProcessing) {
+            isBotTyping = isProcessing;
+            chatInput.disabled = isProcessing;
+            sendButton.disabled = isProcessing;
+            summarizeBtn.disabled = isProcessing;
+            if (micButton) micButton.disabled = isProcessing;
         }
 
         // --- UI Functions ---
@@ -360,19 +401,25 @@
             chatScreen.classList.remove('flex');
         }
 
-        function addMessageToChat(message, sender, canSpeak) {
+        function addMessageToChat(message, sender, canSpeak, customClass = '') {
             const msgWrapper = document.createElement('div');
             msgWrapper.className = `flex items-end space-x-2 ${sender === 'user' ? 'justify-end' : 'justify-start'}`;
+            if(customClass) msgWrapper.classList.add(customClass);
+            
             const msgBubble = document.createElement('div');
             msgBubble.className = `max-w-md lg:max-w-xl px-4 py-2 rounded-xl shadow ${sender === 'user' ? 'chat-bubble-user' : 'chat-bubble-bot'}`;
-            msgBubble.textContent = message;
+            
+            // *** UPDATED: Render Markdown to HTML ***
+            const htmlContent = markdownConverter.makeHtml(message);
+            msgBubble.innerHTML = `<div class="prose">${htmlContent}</div>`;
+
             if (sender === 'user') {
                 msgWrapper.appendChild(msgBubble);
             } else {
                 msgWrapper.appendChild(msgBubble);
                 if (canSpeak && 'speechSynthesis' in window) {
                     const speakBtn = document.createElement('button');
-                    speakBtn.className = 'p-1 text-gray-400 hover:text-blue-600 rounded-full focus:outline-none';
+                    speakBtn.className = 'p-1 text-gray-400 hover:text-blue-600 rounded-full focus:outline-none self-start';
                     speakBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>`;
                     speakBtn.onclick = () => speakText(message);
                     msgWrapper.appendChild(speakBtn);
@@ -390,11 +437,10 @@
             speechSynthesis.speak(utterance);
         }
 
-        function addBotMessage(message, canSpeak) { addMessageToChat(message, 'bot', canSpeak); }
+        function addBotMessage(message, canSpeak, customClass) { addMessageToChat(message, 'bot', canSpeak, customClass); }
         function addUserMessage(message) { addMessageToChat(message, 'user', false); }
         
         function showTypingIndicator() {
-            isBotTyping = true;
             const indicator = document.createElement('div');
             indicator.id = 'typing-indicator';
             indicator.className = 'flex justify-start';
@@ -404,7 +450,6 @@
         }
 
         function hideTypingIndicator() {
-            isBotTyping = false;
             const indicator = document.getElementById('typing-indicator');
             if (indicator) indicator.remove();
         }
